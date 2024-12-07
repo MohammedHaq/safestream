@@ -67,8 +67,9 @@ class LogisticRegression(nn.Module):
 
     # Define the forward pass
     def forward(self, x):
-        x = self.fc(x)
-        return x
+        logits = self.fc(x)
+        probabilties = torch.sigmoid(logits)
+        return probabilties
 
     # Define the training method
     def train_model(self, train_loader, optimizer, device):
