@@ -42,15 +42,15 @@ Y_test = torch.tensor(Y_test.values, dtype=torch.int64)
 
 # Create a DataLoader for the training data
 train_data = torch.utils.data.TensorDataset(X_train, Y_train)
-train_loader = torch.utils.data.DataLoader(train_data, batch_size=64, shuffle=True)
+train_loader = torch.utils.data.DataLoader(train_data, batch_size=16, shuffle=True)
 
 # Create a DataLoader for the validation data
 val_data = torch.utils.data.TensorDataset(X_val, Y_val)
-val_loader = torch.utils.data.DataLoader(val_data, batch_size=64, shuffle=False)
+val_loader = torch.utils.data.DataLoader(val_data, batch_size=16, shuffle=False)
 
 # Create a DataLoader for the testing data
 test_data = torch.utils.data.TensorDataset(X_test, Y_test)
-test_loader = torch.utils.data.DataLoader(test_data, batch_size=64, shuffle=False)
+test_loader = torch.utils.data.DataLoader(test_data, batch_size=16, shuffle=False)
 
 # Define the Neural Network Model
 class NeuralNetwork(nn.Module):
@@ -62,7 +62,7 @@ class NeuralNetwork(nn.Module):
         self.fc4 = nn.Linear(in_features=32, out_features=16)
         self.fc5 = nn.Linear(in_features=16, out_features=2)
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(p=0.3)
+        self.dropout = nn.Dropout(p=0.2)
         self.crossentropyloss = nn.CrossEntropyLoss()
 
     # Define the forward pass
@@ -134,10 +134,10 @@ def experiment_with_features(X_train, Y_train, X_val, Y_val, feature_sets):
         
         # Create DataLoaders
         train_data = torch.utils.data.TensorDataset(X_train_tensor, Y_train)
-        train_loader = torch.utils.data.DataLoader(train_data, batch_size=32, shuffle=True)
+        train_loader = torch.utils.data.DataLoader(train_data, batch_size=16, shuffle=True)
         
         val_data = torch.utils.data.TensorDataset(X_val_tensor, Y_val)
-        val_loader = torch.utils.data.DataLoader(val_data, batch_size=32, shuffle=False)
+        val_loader = torch.utils.data.DataLoader(val_data, batch_size=16, shuffle=False)
         
         # Initialize the model
         model = NeuralNetwork()
@@ -163,7 +163,12 @@ feature_sets = [
     #[0, 1, 2],  # First three features
     #[3, 4, 5],  # Next three features
     #[6, 7, 8],  # Last three features
-    [0, 1, 2, 3, 4, 5, 6, 7, 8]  # All features
+    [4, 0],
+    [0, 1, 3, 4],
+    [0, 1, 2, 3, 4, 7,],
+    [0, 1, 2, 3, 4, 5, 6],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
 ]
 
 # Run the experiments
@@ -173,8 +178,8 @@ print("Experiment results:", results)
 # Initialize the model
 model = NeuralNetwork()
 
-# Define the optimizer with weight decay
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0009, weight_decay=1e-4)
+# Define the optimizer with increased weight decay
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-3)
 
 # Define the device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -182,14 +187,41 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Move the model to the device
 model.to(device)
 
+# Define the learning rate scheduler
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
+
+# Early stopping class
+class EarlyStopping:
+    def __init__(self, patience=10, min_delta=0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best_loss = None
+        self.counter = 0
+
+    def __call__(self, val_loss):
+        if self.best_loss is None:
+            self.best_loss = val_loss
+            return False
+
+        if val_loss < self.best_loss - self.min_delta:
+            self.best_loss = val_loss
+            self.counter = 0
+            return False
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True
+            return False
+
 # Train the model
 num_epochs = 100
 train_losses = []
 val_accuracies = []
 val_losses = []
 
-# Add a learning rate scheduler
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+# Initialize early stopping
+early_stopping = EarlyStopping(patience=10, min_delta=0.001)
 
 # Update training loop
 for epoch in range(num_epochs):
@@ -197,13 +229,18 @@ for epoch in range(num_epochs):
     val_accuracy, val_loss = model.evaluate_model(val_loader, device)
     
     # Step the scheduler
-    scheduler.step()
+    scheduler.step(val_loss)
     
     train_losses.append(train_loss)
     val_accuracies.append(val_accuracy)
     val_losses.append(val_loss)
     
     print(f'Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Validation Accuracy: {val_accuracy:.4f}, Validation Loss: {val_loss:.4f}')
+    
+    # Check early stopping
+    if early_stopping(val_loss):
+        print("Early stopping triggered")
+        break
 
 # Evaluate the model on the test data
 test_accuracy, test_loss = model.evaluate_model(test_loader, device)
@@ -217,4 +254,3 @@ plt.ylabel('Loss')
 plt.title('Training and Validation Loss vs Epoch')
 plt.legend()
 plt.show()
-
